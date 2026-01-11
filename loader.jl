@@ -23,6 +23,7 @@ A key for a Hodge integral:
   (psi-powers, lambda-powers)
 """
 const HodgeKey = Tuple{Tuple{Vararg{Int}},Tuple{Vararg{Int}}}
+# const HodgeKey = Tuple{Vector{Int},Vector{Int}}
 
 """
 Raw on-disk representation of one Hodge integral.
@@ -85,12 +86,62 @@ function load_hdg_database(dir::AbstractString,
   return H
 end
 
-function hodge_integral(g::Int64, n::Int64, psi::Vector{Int64}, lambda::Vector{Int64}, H::Dict{HodgeKey, QQFieldElem})::QQFieldElem
-  @req length(psi) == n "psi must have length n"
-  @req length(lambda) == g "lambda must have length g"
-  if sum(psi) + sum((1:g) .* lambda) != 3*g - 3 + n
-    return zero(QQ)
+@inline function hodge_integral(
+  g::Int,
+  n::Int,
+  C::Vector{Int},
+  valG::Int,
+  Ev::Int,
+  markPsis::Vector{Int},
+  lambda::Vector{Int},
+  H::Dict{HodgeKey,QQFieldElem},
+  psi_buf::Vector{Int}   # preallocated buffer psi_buf = Vector{Int}(undef, n)   # n = Ev + length(markPsis)
+)::QQFieldElem
+
+  # @boundscheck begin
+  #   length(lambda) == g || error("lambda length mismatch")
+  #   length(psi_buf) == n || error("psi buffer length mismatch")
+  # end
+
+  # build psi without allocations
+  @inbounds begin
+    k = 1
+    for i in valG+1:valG+Ev
+      psi_buf[k] = C[i]
+      k += 1
+    end
+    for x in markPsis
+      psi_buf[k] = x
+      k += 1
+    end
   end
-  return H[(sort(psi; rev=true)...,), (lambda...,)]
-  # return get(H, ((sort(psi; rev=true)...,), (lambda...,)), QQ(0))
+
+  # dimension check (cheap)
+  s = 0
+  @inbounds for x in psi_buf
+    s += x
+  end
+  @inbounds for i in 1:g
+    s += i * lambda[i]
+  end
+  s == 3g - 3 + n || return zero(QQ)
+
+  # canonical key
+  sort!(psi_buf; rev=true)
+  key = (Tuple(psi_buf), Tuple(lambda))
+
+  return get(H, key, zero(QQ))
+end
+
+
+function _check_file(dir::AbstractString,
+  gMax::Int,
+  nMax::Int)::Bool
+
+  for g in 1:gMax, n in 1:nMax
+    file = joinpath(dir, "Hodge_g_$(g) n_$(n).hdg")
+    isfile(file) || return false
+  end
+  return true
+
 end
